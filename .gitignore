@@ -1,12 +1,30 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
+*.egg-info/
 build/
 dist/
 wheels/
-/data/
-*.egg-info
-cache/
 
-# Virtual environments
-.venv
+# Virtual environment
+.venv/
+
+# Generated artifacts / cache
+cache/
+cache/**/*.pkl
+*.pkl
+
+# Tooling
+.python-version
+uv.lock.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs / temp
+*.log
+tmp/
+.temp/
