@@ -55,6 +55,12 @@ class InvertedIndex:
         if ' ' in term:
             raise ValueError("Term must be a single token")
         return self.term_frequencies.get(doc_id, Counter()).get(term, 0)
+    
+    def get_bm25_idf(self, term: str) -> float:
+        N = len(self.docmap)
+        df = len(self.get_documents(term))
+        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        return idf
 
     def load(self) -> None:
         try:
@@ -66,6 +72,17 @@ class InvertedIndex:
                 self.term_frequencies = pickle.load(f)
         except FileNotFoundError:
             raise RuntimeError("Inverted index not found. Please build the index first.")
+        
+
+def bm25_idf_command(term: str) -> float:
+    idx = InvertedIndex()
+    idx.load()
+    tokens = tokenize_text(term)
+    if len(tokens) != 1:
+        raise ValueError("term must be a single token")
+    token = tokens[0]
+    idf = idx.get_bm25_idf(token)
+    return idf
 
 
 def tfidf_command(doc_id: int, term: str) -> float:
