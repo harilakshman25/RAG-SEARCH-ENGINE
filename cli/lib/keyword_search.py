@@ -9,6 +9,8 @@ from nltk.stem import PorterStemmer
 from .search_utils import (
     CACHE_DIR,
     DEFAULT_SEARCH_LIMIT,
+    BM25_K1,
+    BM25_B,
     load_movies,
     load_stopwords,
 )
@@ -61,7 +63,12 @@ class InvertedIndex:
         df = len(self.get_documents(term))
         idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
         return idf
-
+    
+    def get_bm25_tf(self, doc_id: int, term: str, k1: float = BM25_K1) -> float:
+        tf = self.get_tf(term, doc_id)
+        bm25_tf = (tf * (k1 + 1)) / (tf + k1)
+        return bm25_tf
+    
     def load(self) -> None:
         try:
             with open(self.index_path, "rb") as f:
@@ -72,6 +79,17 @@ class InvertedIndex:
                 self.term_frequencies = pickle.load(f)
         except FileNotFoundError:
             raise RuntimeError("Inverted index not found. Please build the index first.")
+        
+
+def bm25_tf_command(doc_id: int, term: str) -> float:
+    idx = InvertedIndex()
+    idx.load()
+    tokens = tokenize_text(term)
+    if len(tokens) != 1:
+        raise ValueError("term must be a single token")
+    token = tokens[0]
+    bm25_tf = idx.get_bm25_tf(doc_id, token)
+    return bm25_tf
         
 
 def bm25_idf_command(term: str) -> float:
