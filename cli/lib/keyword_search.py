@@ -75,6 +75,23 @@ class InvertedIndex:
         bm25_tf = (tf * (k1 + 1)) / (tf + k1 * length_norm) if tf > 0 else 0.0
         return bm25_tf
     
+    def bm25(self, doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
+        idf = self.get_bm25_idf(term)
+        bm25_tf = self.get_bm25_tf(doc_id, term, k1, b)
+        return idf * bm25_tf
+    
+    def bm25_search(self, query: str, limit: int = DEFAULT_SEARCH_LIMIT, k1: float = BM25_K1, b: float = BM25_B) -> list[dict]:
+        query_tokens = tokenize_text(query)
+        scores = defaultdict(float)
+        for token in query_tokens:
+            for doc_id in self.get_documents(token):
+                scores[doc_id] += self.bm25(doc_id, token, k1, b)
+        ranked_docs = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+        results = [self.docmap[doc_id] for doc_id, _ in ranked_docs]
+        for i, (doc_id, score) in enumerate(ranked_docs):
+            results[i]['score'] = score
+        return results
+    
     def load(self) -> None:
         try:
             with open(self.index_path, "rb") as f:
@@ -93,7 +110,13 @@ class InvertedIndex:
         avg_length = total_length / len(self.doc_lengths) if self.doc_lengths else 0
         return avg_length
        
-        
+
+def bm25search_command(query: str, limit: int = DEFAULT_SEARCH_LIMIT, k1: float = BM25_K1, b: float = BM25_B) -> list[dict]:
+    idx = InvertedIndex()
+    idx.load()
+    results = idx.bm25_search(query, limit, k1, b)
+    return results
+
 
 def bm25_tf_command(doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
     idx = InvertedIndex()
