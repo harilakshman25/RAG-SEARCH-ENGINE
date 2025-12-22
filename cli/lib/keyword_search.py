@@ -21,8 +21,10 @@ class InvertedIndex:
         self.index = defaultdict(set)
         self.docmap: dict[int, dict] = {}
         self.term_frequencies: dict[int, Counter[str]] = {}
+        self.doc_lengths: dict[int, int] = {}
         self.index_path = os.path.join(CACHE_DIR, "index.pkl")
         self.docmap_path = os.path.join(CACHE_DIR, "docmap.pkl")
+        self.doc_lengths_path = os.path.join(CACHE_DIR, "doc_lengths.pkl")
         self.term_frequencies_path = os.path.join(CACHE_DIR, "term_frequencies.pkl")
 
     def build(self) -> None:
@@ -39,6 +41,8 @@ class InvertedIndex:
             pickle.dump(self.index, f)
         with open(self.docmap_path, "wb") as f:
             pickle.dump(self.docmap, f)
+        with open(self.doc_lengths_path, "wb") as f:
+            pickle.dump(self.doc_lengths, f)
         with open(self.term_frequencies_path, "wb") as f:
             pickle.dump(self.term_frequencies, f)
 
@@ -51,9 +55,9 @@ class InvertedIndex:
         for token in set(tokens):
             self.index[token].add(doc_id)
         self.term_frequencies[doc_id] = Counter(tokens)
+        self.doc_lengths[doc_id] = len(tokens)
 
     def get_tf(self, term: str, doc_id: int) -> int:
-        # Ensure term is single token
         if ' ' in term:
             raise ValueError("Term must be a single token")
         return self.term_frequencies.get(doc_id, Counter()).get(term, 0)
@@ -63,10 +67,12 @@ class InvertedIndex:
         df = len(self.get_documents(term))
         idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
         return idf
-    
-    def get_bm25_tf(self, doc_id: int, term: str, k1: float = BM25_K1) -> float:
+
+    def get_bm25_tf(self, doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
         tf = self.get_tf(term, doc_id)
-        bm25_tf = (tf * (k1 + 1)) / (tf + k1)
+        avg_length = self.__get_avg_doc_length()
+        length_norm = 1 - b + b * (self.doc_lengths.get(doc_id, 0) / avg_length) if avg_length > 0 else 1
+        bm25_tf = (tf * (k1 + 1)) / (tf + k1 * length_norm) if tf > 0 else 0.0
         return bm25_tf
     
     def load(self) -> None:
@@ -75,20 +81,28 @@ class InvertedIndex:
                 self.index = pickle.load(f)
             with open(self.docmap_path, "rb") as f:
                 self.docmap = pickle.load(f)
+            with open(self.doc_lengths_path, "rb") as f:
+                self.doc_lengths = pickle.load(f)
             with open(self.term_frequencies_path, "rb") as f:
                 self.term_frequencies = pickle.load(f)
         except FileNotFoundError:
             raise RuntimeError("Inverted index not found. Please build the index first.")
         
+    def __get_avg_doc_length(self) -> float:
+        total_length = sum(self.doc_lengths.values())
+        avg_length = total_length / len(self.doc_lengths) if self.doc_lengths else 0
+        return avg_length
+       
+        
 
-def bm25_tf_command(doc_id: int, term: str) -> float:
+def bm25_tf_command(doc_id: int, term: str, k1: float = BM25_K1, b: float = BM25_B) -> float:
     idx = InvertedIndex()
     idx.load()
     tokens = tokenize_text(term)
     if len(tokens) != 1:
         raise ValueError("term must be a single token")
     token = tokens[0]
-    bm25_tf = idx.get_bm25_tf(doc_id, token)
+    bm25_tf = idx.get_bm25_tf(doc_id, token, k1, b)
     return bm25_tf
         
 
