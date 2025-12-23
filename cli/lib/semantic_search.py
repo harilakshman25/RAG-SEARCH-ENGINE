@@ -33,6 +33,14 @@ class SemanticSearch:
         return self.embeddings
 
 
+def embed_query_text(query: str, model_name: str = "all-MiniLM-L6-v2") -> None:
+    model = SemanticSearch(model_name)
+    embedding = model.generate_embedding(query)
+    print(f"Query: {query}")
+    print(f"First 5 dimensions: {embedding[:5]}")
+    print(f"Shape: {len(embedding)} dimensions")
+    
+
 def verify_embeddings() -> None:
     model = SemanticSearch()
     documents = load_movies()
