@@ -49,12 +49,15 @@ class SemanticSearch:
         return self.embeddings
 
 
-def chunk_command(text: str, chunk_size: int = 200) -> list[str]:
+def chunk_command(text: str, chunk_size: int = 200, overlap: int = 5) -> list[str]:
     words = text.split()
     chunks = []
-    for i in range(0, len(words), chunk_size):
-        chunk = ' '.join(words[i:i + chunk_size])
+    start = 0
+    while start < len(words):
+        end = min(start + chunk_size, len(words))
+        chunk = " ".join(words[start:end])
         chunks.append(chunk)
+        start += chunk_size - overlap
     return chunks
 
 
