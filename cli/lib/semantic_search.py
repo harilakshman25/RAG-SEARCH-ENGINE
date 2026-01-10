@@ -4,6 +4,7 @@ import os
 import json
 import hashlib
 from lib.search_utils import CACHE_DIR, load_movies
+import re
 
 
 class SemanticSearch:
@@ -93,6 +94,25 @@ class SemanticSearch:
             })
 
         return results
+
+
+def semantic_chunk_command(text: str, max_chunk_size: int = 4, overlap: int = 0) -> list[str]:
+    if overlap >= max_chunk_size:
+        raise ValueError("overlap must be smaller than max_chunk_size")
+
+    # Split text into sentences
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+
+    chunks = []
+    start = 0
+
+    while start < len(sentences):
+        end = min(start + max_chunk_size, len(sentences))
+        chunk = " ".join(sentences[start:end])
+        chunks.append(chunk)
+        start += max_chunk_size - overlap
+
+    return chunks
 
 
 def chunk_command(text: str, chunk_size: int = 200, overlap: int = 5) -> list[str]:
