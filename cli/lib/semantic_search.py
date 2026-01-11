@@ -221,16 +221,36 @@ def semantic_chunk_command(text: str, max_chunk_size: int = 4, overlap: int = 0)
     if overlap >= max_chunk_size:
         raise ValueError("overlap must be smaller than max_chunk_size")
 
-    # Split text into sentences
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    # 1. Strip input text
+    text = text.strip()
+    if not text:
+        return []
 
+    # 2. Split into sentences
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    # 3. Handle single-sentence-without-punctuation case
+    if len(sentences) == 1 and not re.search(r"[.!?]$", sentences[0]):
+        sentences = [text]
+
+    # 4. Strip each sentence and remove empties
+    cleaned_sentences = []
+    for s in sentences:
+        s = s.strip()
+        if s:
+            cleaned_sentences.append(s)
+
+    if not cleaned_sentences:
+        return []
+
+    # 5. Chunk by sentence count
     chunks = []
     start = 0
-
-    while start < len(sentences):
-        end = min(start + max_chunk_size, len(sentences))
-        chunk = " ".join(sentences[start:end])
-        chunks.append(chunk)
+    while start < len(cleaned_sentences):
+        end = min(start + max_chunk_size, len(cleaned_sentences))
+        chunk = " ".join(cleaned_sentences[start:end])
+        if chunk.strip():
+            chunks.append(chunk)
         start += max_chunk_size - overlap
 
     return chunks
