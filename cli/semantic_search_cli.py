@@ -9,7 +9,8 @@ from lib.semantic_search import (
     search_command,
     chunk_command,
     semantic_chunk_command,
-    embed_chunks_command
+    embed_chunks_command,
+    search_chunks_command,
 )
 
 def main() -> None:
@@ -39,6 +40,10 @@ def main() -> None:
 
     subparsers.add_parser("embed_chunks", help="Generate chunked embeddings")
 
+    search_chunks_parser = subparsers.add_parser("search_chunked", help="Search over chunked embeddings")
+    search_chunks_parser.add_argument("query", type=str)
+    search_chunks_parser.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT)
+
     args = parser.parse_args()
 
     match args.command:
@@ -60,6 +65,8 @@ def main() -> None:
                 print(f"Chunk {i}:\n{chunk}\n")
         case "embed_chunks":
             embed_chunks_command()
+        case "search_chunked":
+            search_chunks_command(args.query, args.limit)
         case _:
             parser.print_help()
 
