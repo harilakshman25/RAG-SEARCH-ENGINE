@@ -2,6 +2,7 @@ import argparse
 from lib.hybrid_search import (
     normalize_command,
     weighted_search_command,
+    rrf_search_command
 )
 from lib.search_utils import DEFAULT_SEARCH_LIMIT
 
@@ -17,6 +18,11 @@ def main() -> None:
     weighted_search_parser.add_argument("--alpha", type=float, default=0.5, help="Weight for semantic search")
     weighted_search_parser.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT, help="Number of results to return")
 
+    rrf_search_parser = subparsers.add_parser("rrf-search", help="Perform RRF hybrid search")
+    rrf_search_parser.add_argument("query", type=str, help="Search query")
+    rrf_search_parser.add_argument("--k", type=int, default=60, help="RRF parameter k")
+    rrf_search_parser.add_argument("--limit", type=int, default=DEFAULT_SEARCH_LIMIT, help="Number of results to return")
+
     args = parser.parse_args()
 
     match args.command:
@@ -25,12 +31,9 @@ def main() -> None:
             for score in normalized_scores:
                 print(f"* {score:.4f}")
         case "weighted-search":
-            data = weighted_search_command(args.query, args.alpha, args.limit)
-            for i, item in enumerate(data, 1):
-                print(f"{i}. {item['metadata']['title']}")
-                print(f"   Hybrid Score: {item['hybrid_score']:.4f}\n")
-                print(f"   BM25 Score: {item['bm25_score']:.4f}, Semantic Score: {item['semantic_score']:.4f}\n")
-                print(f"   {item['metadata']['description'][:100]}...\n")
+            weighted_search_command(args.query, args.alpha, args.limit)
+        case "rrf-search":
+            rrf_search_command(args.query, args.k, args.limit)
         case _:
             parser.print_help()
 

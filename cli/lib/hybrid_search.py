@@ -7,6 +7,7 @@ from .search_utils import load_movies as load_documents
 class HybridSearch:
     def __init__(self, documents: list[dict]) -> None:
         self.documents = documents
+        self.doc_by_id = {doc["id"]: doc for doc in documents}
         self.semantic_search = ChunkedSemanticSearch()
         self.semantic_search.load_or_create_chunk_embeddings(documents)
 
@@ -22,15 +23,12 @@ class HybridSearch:
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
         """Perform weighted hybrid search combining BM25 and semantic search."""
 
-        # 1. Retrieve large candidate sets
         bm25_results = self._bm25_search(query, limit * 500)
         semantic_results = self.semantic_search.search_chunks(query, limit * 500)
 
-        # 2. Build raw score maps
         bm25_dict = {item["id"]: item["score"] for item in bm25_results}
         semantic_dict = {item["id"]: item["score"] for item in semantic_results}
 
-        # 3. Normalize scores ACROSS ALL DOCUMENTS
         bm25_ids = list(bm25_dict.keys())
         bm25_scores = [bm25_dict[i] for i in bm25_ids]
         bm25_norm_scores = normalize_command(bm25_scores)
@@ -41,7 +39,6 @@ class HybridSearch:
         semantic_norm_scores = normalize_command(semantic_scores)
         semantic_norm = dict(zip(semantic_ids, semantic_norm_scores))
 
-        # 4. Combine scores
         all_doc_ids = set(bm25_dict.keys()).union(semantic_dict.keys())
         hybrid_scores = []
 
@@ -56,25 +53,71 @@ class HybridSearch:
                 "bm25_score": bm25_score,
                 "semantic_score": semantic_score,
                 "hybrid_score": hybrid_score,
-                "metadata": self.documents[doc_id],
+                "metadata": self.doc_by_id.get(doc_id),
             })
 
-        # 5. Sort and truncate
         hybrid_scores.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return hybrid_scores[:limit]
 
     def rrf_search(self, query: str, k: int, limit: int = 10):
-        raise NotImplementedError("RRF hybrid search is not implemented yet.")
+        "Perform RRF hybrid search combining BM25 and semantic search."
+
+        bm25_results = self._bm25_search(query, limit * 500)
+        semantic_results = self.semantic_search.search_chunks(query, limit * 500)
+
+        bm25_results.sort(key=lambda x: x["score"], reverse=True)
+        semantic_results.sort(key=lambda x: x["score"], reverse=True)
+
+        bm25_dict = {item["id"]: rank for rank, item in enumerate(bm25_results, 1)}
+        semantic_dict = {item["id"]: rank for rank, item in enumerate(semantic_results, 1)}
+
+        all_doc_ids = set(bm25_dict.keys()).union(semantic_dict.keys())
+        rrf_scores = []
+        for doc_id in all_doc_ids:
+            bm25_rank = bm25_dict.get(doc_id, float('inf'))
+            semantic_rank = semantic_dict.get(doc_id, float('inf'))
+
+            rrf_score = self.__rrf_score(bm25_rank, k) + self.__rrf_score(semantic_rank, k)
+
+            rrf_scores.append({
+                "doc_id": doc_id,
+                "rrf_score": rrf_score,
+                "bm25_rank": bm25_rank,
+                "semantic_rank": semantic_rank,
+                "metadata": self.doc_by_id.get(doc_id),
+            })
+
+        rrf_scores.sort(key=lambda x: x["rrf_score"], reverse=True)
+        return rrf_scores[:limit]
+
+    def __rrf_score(self, rank: int, k: int) -> float:
+        return 1.0 / (k + rank)
 
 
-def weighted_search_command(query: str, alpha: float, limit: int) -> list[dict]:
+def rrf_search_command(query: str, k: int, limit: int) -> None:
+    """Perform RRF hybrid search and print results."""
+
+    documents = load_documents()
+    hybrid_search = HybridSearch(documents)
+    results = hybrid_search.rrf_search(query, k, limit)
+    for i, item in enumerate(results, 1):
+        print(f"{i}. {item['metadata']['title']}")
+        print(f"   RRF Score: {item['rrf_score']:.4f}")
+        print(f"   BM25 Rank: {item['bm25_rank']}, Semantic Rank: {item['semantic_rank']}")
+        print(f"   {item['metadata']['description'][:150]}...\n")
+
+
+def weighted_search_command(query: str, alpha: float, limit: int) -> None:
     """Perform weighted hybrid search and print results."""
 
     documents = load_documents()
     hybrid_search = HybridSearch(documents)
     results = hybrid_search.weighted_search(query, alpha, limit)
-
-    return results
+    for i, item in enumerate(results, 1):
+        print(f"{i}. {item['metadata']['title']}")
+        print(f"   Hybrid Score: {item['hybrid_score']:.4f}")
+        print(f"   BM25 Score: {item['bm25_score']:.4f}, Semantic Score: {item['semantic_score']:.4f}")
+        print(f"   {item['metadata']['description'][:150]}...\n")
 
 
 def normalize_command(scores: list[float]) -> list[float]:
