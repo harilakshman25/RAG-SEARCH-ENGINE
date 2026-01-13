@@ -9,6 +9,10 @@ wheels/
 # Virtual environment
 .venv/
 
+#Environment files
+.env
+.env.*.local
+
 # Generated artifacts / cache
 cache/
 cache/**/*.pkl
