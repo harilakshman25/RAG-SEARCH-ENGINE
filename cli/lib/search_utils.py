@@ -1,5 +1,10 @@
 import json
 import os
+from dotenv import load_dotenv
+from google import genai
+
+load_dotenv()
+api_key = os.environ.get("GEMINI_API_KEY")
 
 DEFAULT_SEARCH_LIMIT = 5
 BM25_K1 = 1.5
@@ -21,3 +26,23 @@ def load_stopwords() -> list[str]:
         stopwords = [line.strip() for line in f]
     return stopwords
 
+client = genai.Client(api_key=api_key)
+
+def enhance_query(query: str, method : str) -> str:
+    prompt = f"""Fix any spelling errors in this movie search query.
+
+                Only correct obvious typos. Don't change correctly spelled words.
+
+                Query: "{query}"
+
+                If no errors, return the original query.
+                Corrected:"""
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    enhaned_query = response.text.strip()[len("Corrected:"):].strip().strip('"')
+    if query.strip() != enhaned_query:
+        print(f"Enhanced query ({method}): '{query}' -> '{enhaned_query}'\n")
+
+    return enhaned_query

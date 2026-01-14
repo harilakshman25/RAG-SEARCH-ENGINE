@@ -2,7 +2,7 @@ import os
 
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
-from .search_utils import load_movies as load_documents
+from .search_utils import load_movies as load_documents, enhance_query
 
 class HybridSearch:
     def __init__(self, documents: list[dict]) -> None:
@@ -59,9 +59,12 @@ class HybridSearch:
         hybrid_scores.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return hybrid_scores[:limit]
 
-    def rrf_search(self, query: str, k: int, limit: int = 10):
+    def rrf_search(self, query: str, k: int, limit: int = 10, enhance_method: str = None) -> list[dict]:
         "Perform RRF hybrid search combining BM25 and semantic search."
 
+        if enhance_method:
+            query = enhance_query(query, enhance_method)
+        
         bm25_results = self._bm25_search(query, limit * 500)
         semantic_results = self.semantic_search.search_chunks(query, limit * 500)
 
@@ -94,12 +97,12 @@ class HybridSearch:
         return 1.0 / (k + rank)
 
 
-def rrf_search_command(query: str, k: int, limit: int) -> None:
+def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = None) -> None:
     """Perform RRF hybrid search and print results."""
 
     documents = load_documents()
     hybrid_search = HybridSearch(documents)
-    results = hybrid_search.rrf_search(query, k, limit)
+    results = hybrid_search.rrf_search(query, k, limit, enhance_method)
     for i, item in enumerate(results, 1):
         print(f"{i}. {item['metadata']['title']}")
         print(f"   RRF Score: {item['rrf_score']:.4f}")
