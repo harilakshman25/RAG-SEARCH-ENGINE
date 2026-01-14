@@ -2,6 +2,7 @@ import json
 import os
 from dotenv import load_dotenv
 from google import genai
+from google.genai.errors import APIError, ServerError
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -28,18 +29,37 @@ def load_stopwords() -> list[str]:
 
 client = genai.Client(api_key=api_key)
 
-def enhance_query(query: str, method : str) -> str:
-    if method == "spell":
-        enhaned_query = spelling_corrector(query)
-    elif method == "rewrite":
-        enhaned_query = rewriter(query)
-    else:
-        enhaned_query = query
+def enhance_query(query: str, method: str) -> str:
+    try:
+        if method == "spell":
+            enhanced_query = spelling_corrector(query)
+        elif method == "rewrite":
+            enhanced_query = rewriter(query)
+        elif method == "expand":
+            enhanced_query = expander(query)
+        else:
+            enhanced_query = query
 
-    if query.strip() != enhaned_query:
-        print(f"Enhanced query ({method}): '{query}' -> '{enhaned_query}'\n")
+        if query.strip() != enhanced_query:
+            print(
+                f"Enhanced query ({method}): '{query}' -> '{enhanced_query}'\n"
+            )
 
-    return enhaned_query
+        return enhanced_query
+
+    except (APIError, ServerError) as e:
+        print(
+            f"[WARN] Query enhancement ({method}) failed: "
+            f"{e.__class__.__name__} – falling back to original query.\n"
+        )
+        return query
+
+    except Exception as e:
+        print(
+            f"[WARN] Unexpected error during query enhancement: "
+            f"{e.__class__.__name__} – falling back to original query.\n"
+        )
+        return query
 
 def spelling_corrector(query: str) -> str:
     prompt = f"""Fix any spelling errors in this movie search query.
@@ -54,8 +74,9 @@ def spelling_corrector(query: str) -> str:
     response = client.models.generate_content(
         model="gemini-2.5-flash", contents=prompt
     )
-    enhaned_query = response.text.strip()[len("Corrected:"):].strip().strip('"')
-    return enhaned_query
+    # print(response.text) #debug
+    spell_corrected_query = response.text.strip()[len("Corrected:"):].strip().strip('"')
+    return spell_corrected_query
 
 def rewriter(query: str) -> str:
     prompt = f"""Rewrite this movie search query to be more specific and searchable.
@@ -80,5 +101,29 @@ def rewriter(query: str) -> str:
     response = client.models.generate_content(
         model="gemini-2.5-flash", contents=prompt
     )
+    # print(response.text) #debug
     rewritten_query = response.text.strip()[len("Rewritten query:"):].strip().strip('"')
     return rewritten_query
+
+def expander(query: str) -> str:
+    prompt = f"""Expand this movie search query with related terms.
+
+                Add synonyms and related concepts that might appear in movie descriptions.
+                Keep expansions relevant and focused.
+                This will be appended to the original query.
+
+                Examples:
+
+                - "scary bear movie" -> "scary horror grizzly bear movie terrifying film"
+                - "action movie with bear" -> "action thriller bear chase fight adventure"
+                - "comedy with bear" -> "comedy funny bear humor lighthearted"
+
+                Query: "{query}"
+                Expanded query:
+                """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    # print(response.text) #debug
+    expanded_query = response.text.strip().strip().strip('"')
+    return expanded_query
