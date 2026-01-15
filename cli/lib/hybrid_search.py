@@ -1,5 +1,6 @@
 import os
-
+import time
+from .search_utils import llm_individual_rerank
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
 from .search_utils import load_movies as load_documents, enhance_query
@@ -19,6 +20,13 @@ class HybridSearch:
     def _bm25_search(self, query: str, limit: int) -> list[dict]:
         self.idx.load()
         return self.idx.bm25_search(query, limit)
+    
+    def _individual_rerank(self, query: str, results: list[dict]) -> list[dict]:
+        for item in results:
+            score = llm_individual_rerank(query, item["metadata"])
+            item["rerank_score"] = score
+            time.sleep(15)  # To respect rate limits
+        return sorted(results, key=lambda x: x["rerank_score"], reverse=True)
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
         """Perform weighted hybrid search combining BM25 and semantic search."""
@@ -59,7 +67,7 @@ class HybridSearch:
         hybrid_scores.sort(key=lambda x: x["hybrid_score"], reverse=True)
         return hybrid_scores[:limit]
 
-    def rrf_search(self, query: str, k: int, limit: int = 10, enhance_method: str = None) -> list[dict]:
+    def rrf_search(self, query: str, k: int, limit: int = 10, enhance_method: str = None, rerank_method: str = None) -> list[dict]:
         "Perform RRF hybrid search combining BM25 and semantic search."
 
         if enhance_method:
@@ -91,20 +99,30 @@ class HybridSearch:
             })
 
         rrf_scores.sort(key=lambda x: x["rrf_score"], reverse=True)
+        rrf_scores = rrf_scores[:limit * 5]
+
+        if rerank_method == "individual":
+            print(f"Reranking top {limit} results using individual method...")
+            reranked = self._individual_rerank(query, rrf_scores)
+            return reranked[:limit]
+
         return rrf_scores[:limit]
 
     def __rrf_score(self, rank: int, k: int) -> float:
         return 1.0 / (k + rank)
 
 
-def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = None) -> None:
+def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = None, rerank_method: str = None) -> None:
     """Perform RRF hybrid search and print results."""
 
     documents = load_documents()
     hybrid_search = HybridSearch(documents)
-    results = hybrid_search.rrf_search(query, k, limit, enhance_method)
+    results = hybrid_search.rrf_search(query, k, limit, enhance_method, rerank_method)
+    print(f"Reciprocal Rank Fusion Results for '{query}' (k={k}):\n")
     for i, item in enumerate(results, 1):
         print(f"{i}. {item['metadata']['title']}")
+        if 'rerank_score' in item:
+            print(f"   Rerank Score: {item['rerank_score']:.4f}/10")
         print(f"   RRF Score: {item['rrf_score']:.4f}")
         print(f"   BM25 Rank: {item['bm25_rank']}, Semantic Rank: {item['semantic_rank']}")
         print(f"   {item['metadata']['description'][:150]}...\n")

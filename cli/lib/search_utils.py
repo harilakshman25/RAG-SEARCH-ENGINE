@@ -127,3 +127,21 @@ def expander(query: str) -> str:
     # print(response.text) #debug
     expanded_query = response.text.strip().strip().strip('"')
     return expanded_query
+
+def llm_individual_rerank(query: str, doc: dict) -> float:
+    prompt = f"""Rate how well this movie matches the search query.
+
+                Query: "{query}"
+                Movie: {doc.get("title", "")} - {doc.get("description", "")}
+
+                Rate 0-10 (10 = perfect match).
+                Give me ONLY the number.
+
+                Score:"""
+    
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt
+    )
+    # print(response.text) #debug
+    return float(response.text.strip())
