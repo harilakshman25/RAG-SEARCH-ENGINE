@@ -89,7 +89,7 @@ class HybridSearch:
         return hybrid_scores[:limit]
 
     def rrf_search(self, query: str, k: int, limit: int = 10, enhance_method: str = None, rerank_method: str = None) -> list[dict]:
-        "Perform RRF hybrid search combining BM25 and semantic search."
+        """Perform RRF hybrid search combining BM25 and semantic search."""
 
         if enhance_method:
             query = enhance_query(query, enhance_method)
@@ -120,24 +120,31 @@ class HybridSearch:
             })
 
         rrf_scores.sort(key=lambda x: x["rrf_score"], reverse=True)
-        rrf_scores = rrf_scores[:limit * 5]
+        # Narrow down the candidates for reranking
+        candidate_results = rrf_scores[:limit * 5]
 
-        if rerank_method == "individual":
-            print(f"Reranking top {limit} results using individual method...")
-            reranked = self._individual_rerank(query, rrf_scores)
-            return reranked[:limit]
-        
-        if rerank_method == "batch":
-            print(f"Reranking top {limit} results using batch method...")
-            reranked = self._batch_rerank(query, rrf_scores)
-            return reranked[:limit]
-        
+        # 1. Handle non-API Local Reranking first
         if rerank_method == "cross_encoder":
-            print(f"Reranking top {limit} results using cross_encoder method...")
-            reranked = self._cross_encoder_rerank(query, rrf_scores)
-            return reranked[:limit]
+            print(f"Reranking top {limit} results using local cross_encoder...")
+            return self._cross_encoder_rerank(query, candidate_results)[:limit]
 
-        return rrf_scores[:limit]
+        # 2. Handle LLM Reranking with Fallback
+        if rerank_method in ["individual", "batch"]:
+            try:
+                if rerank_method == "individual":
+                    print(f"Reranking top {limit} results using individual LLM method...")
+                    return self._individual_rerank(query, candidate_results)[:limit]
+                
+                if rerank_method == "batch":
+                    print(f"Reranking top {limit} results using batch LLM method...")
+                    return self._batch_rerank(query, candidate_results)[:limit]
+            
+            except Exception as e:
+                print(f"[FALLBACK] LLM Reranking failed ({e}). Defaulting to local CrossEncoder...")
+                return self._cross_encoder_rerank(query, candidate_results)[:limit]
+        
+        # 3. No reranking requested
+        return candidate_results[:limit]
 
     def __rrf_score(self, rank: int, k: int) -> float:
         return 1.0 / (k + rank)
