@@ -1,6 +1,6 @@
 import os
 import time
-from .search_utils import llm_individual_rerank
+from .search_utils import llm_individual_rerank, llm_batch_rerank
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
 from .search_utils import load_movies as load_documents, enhance_query
@@ -27,6 +27,13 @@ class HybridSearch:
             item["rerank_score"] = score
             time.sleep(15)  # To respect rate limits
         return sorted(results, key=lambda x: x["rerank_score"], reverse=True)
+    
+    def _batch_rerank(self, query: str, results: list[dict]) -> list[dict]:
+        ordered_ids = llm_batch_rerank(query, results)
+        rank_map = {doc_id: rank for rank, doc_id in enumerate(ordered_ids, 1)}
+        for item in results:
+            item["rerank_rank"] = rank_map.get(item["doc_id"], float("inf"))
+        return sorted(results, key=lambda x: x["rerank_rank"])
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
         """Perform weighted hybrid search combining BM25 and semantic search."""
@@ -105,7 +112,12 @@ class HybridSearch:
             print(f"Reranking top {limit} results using individual method...")
             reranked = self._individual_rerank(query, rrf_scores)
             return reranked[:limit]
-
+        
+        if rerank_method == "batch":
+            print(f"Reranking top {limit} results using batch method...")
+            reranked = self._batch_rerank(query, rrf_scores)
+            return reranked[:limit]
+        
         return rrf_scores[:limit]
 
     def __rrf_score(self, rank: int, k: int) -> float:
@@ -123,6 +135,8 @@ def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = Non
         print(f"{i}. {item['metadata']['title']}")
         if 'rerank_score' in item:
             print(f"   Rerank Score: {item['rerank_score']:.4f}/10")
+        elif 'rerank_rank' in item:
+            print(f"   Rerank Rank: {item['rerank_rank']}")
         print(f"   RRF Score: {item['rrf_score']:.4f}")
         print(f"   BM25 Rank: {item['bm25_rank']}, Semantic Rank: {item['semantic_rank']}")
         print(f"   {item['metadata']['description'][:150]}...\n")

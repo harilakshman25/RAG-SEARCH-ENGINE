@@ -145,3 +145,28 @@ def llm_individual_rerank(query: str, doc: dict) -> float:
     )
     # print(response.text) #debug
     return float(response.text.strip())
+
+def llm_batch_rerank(query: str, results: list[dict]) -> list[int]:
+    doc_list_str = "\n".join(
+        f"{item['doc_id']}: {item['metadata'].get('title','')} - {item['metadata'].get('description','')}"
+        for item in results
+    )
+
+    prompt = f"""Rank these movies by relevance to the search query.
+
+                Query: "{query}"
+
+                Movies:
+                {doc_list_str}
+
+                Return ONLY the IDs in order of relevance (best match first).
+                Return a valid JSON list, nothing else.
+                """
+
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt
+    )
+    # print(response.text) #debug
+    return json.loads(response.text.strip())
+
