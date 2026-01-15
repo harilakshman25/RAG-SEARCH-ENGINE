@@ -4,6 +4,7 @@ from .search_utils import llm_individual_rerank, llm_batch_rerank
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
 from .search_utils import load_movies as load_documents, enhance_query
+from sentence_transformers import CrossEncoder
 
 class HybridSearch:
     def __init__(self, documents: list[dict]) -> None:
@@ -34,6 +35,19 @@ class HybridSearch:
         for item in results:
             item["rerank_rank"] = rank_map.get(item["doc_id"], float("inf"))
         return sorted(results, key=lambda x: x["rerank_rank"])
+    
+    def _cross_encoder_rerank(self, query: str, results: list[dict]) -> list[dict]:
+        pairs = [
+            [query, f"{item['metadata'].get('title','')} - {item['metadata'].get('description','')}"]
+            for item in results
+        ]
+        cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+        scores = cross_encoder.predict(pairs)
+
+        for item, score in zip(results, scores):
+            item["cross_encoder_score"] = float(score)
+
+        return sorted(results, key=lambda x: x["cross_encoder_score"], reverse=True)
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
         """Perform weighted hybrid search combining BM25 and semantic search."""
@@ -118,6 +132,11 @@ class HybridSearch:
             reranked = self._batch_rerank(query, rrf_scores)
             return reranked[:limit]
         
+        if rerank_method == "cross_encoder":
+            print(f"Reranking top {limit} results using cross_encoder method...")
+            reranked = self._cross_encoder_rerank(query, rrf_scores)
+            return reranked[:limit]
+
         return rrf_scores[:limit]
 
     def __rrf_score(self, rank: int, k: int) -> float:
@@ -137,6 +156,8 @@ def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = Non
             print(f"   Rerank Score: {item['rerank_score']:.4f}/10")
         elif 'rerank_rank' in item:
             print(f"   Rerank Rank: {item['rerank_rank']}")
+        elif 'cross_encoder_score' in item:
+            print(f"   Cross Encoder Score: {item['cross_encoder_score']:.4f}")
         print(f"   RRF Score: {item['rrf_score']:.4f}")
         print(f"   BM25 Rank: {item['bm25_rank']}, Semantic Rank: {item['semantic_rank']}")
         print(f"   {item['metadata']['description'][:150]}...\n")
