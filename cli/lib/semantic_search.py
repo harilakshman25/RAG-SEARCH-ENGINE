@@ -3,7 +3,7 @@ import numpy as np
 import os
 import json
 import hashlib
-from lib.search_utils import CACHE_DIR, load_movies, SCORE_PRECISION
+from .search_utils import CACHE_DIR, load_movies, SCORE_PRECISION
 import re
 
 
