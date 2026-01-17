@@ -2,6 +2,7 @@ import argparse
 from lib.augmented_generation import (
     perform_rag,
     summarize,
+    search_with_citations,
 )
 
 def main():
@@ -19,6 +20,12 @@ def main():
     summarize_parser.add_argument("query", type=str, help="Gives a summary of the context retrieved based on the query")
     summarize_parser.add_argument("--limit", type=int, default=5, help="Number of documents to retrieve for context")
 
+    citations_parser = subparsers.add_parser(
+        "citations", help="Generate citations for provided text"
+    )
+    citations_parser.add_argument("query", type=str, help="Text to generate citations for")
+    citations_parser.add_argument("--limit", type=int, default=5, help="Number of citations to generate")
+
     args = parser.parse_args()
 
     match args.command:
@@ -26,6 +33,8 @@ def main():
             perform_rag(args.query)
         case "summarize":
             summarize(args.query, args.limit)
+        case "citations":
+            search_with_citations(args.query, args.limit)
         case _:
             parser.print_help()
 
