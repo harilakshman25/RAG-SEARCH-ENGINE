@@ -1,5 +1,8 @@
 import argparse
-from lib.augmented_generation import perform_rag
+from lib.augmented_generation import (
+    perform_rag,
+    summarize,
+)
 
 def main():
     parser = argparse.ArgumentParser(description="Retrieval Augmented Generation CLI")
@@ -10,11 +13,19 @@ def main():
     )
     rag_parser.add_argument("query", type=str, help="Search query for RAG")
 
+    summarize_parser = subparsers.add_parser(
+        "summarize", help="Generate a summary based on provided context"
+    )
+    summarize_parser.add_argument("query", type=str, help="Gives a summary of the context retrieved based on the query")
+    summarize_parser.add_argument("--limit", type=int, default=5, help="Number of documents to retrieve for context")
+
     args = parser.parse_args()
 
     match args.command:
         case "rag":
             perform_rag(args.query)
+        case "summarize":
+            summarize(args.query, args.limit)
         case _:
             parser.print_help()
 
