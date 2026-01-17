@@ -18,7 +18,6 @@ DATA_PATH = os.path.join(PROJECT_ROOT, "data", "movies.json")
 STOPWORDS_PATH = os.path.join(PROJECT_ROOT, "data", "stopwords.txt")
 CACHE_DIR = os.path.join(PROJECT_ROOT, "cache")
 
-# Ordered list of 10 models to cycle through
 FALLBACK_MODELS = [
     "gemini-2.5-flash",          
     "gemini-2.5-flash-lite",     
@@ -45,10 +44,6 @@ def load_stopwords() -> list[str]:
 client = genai.Client(api_key=api_key)
 
 def generate_content_with_fallback(prompt: str) -> str:
-    """
-    Attempts to generate content by rotating through models.
-    Stops immediately if a hard quota limit is hit.
-    """
     for model_name in FALLBACK_MODELS:
         try:
             response = client.models.generate_content(
@@ -64,11 +59,9 @@ def generate_content_with_fallback(prompt: str) -> str:
 
         except ClientError as e:
             msg = str(e).upper()
-            # Stop rotating if we hit a hard limit (quota exhausted)
             if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
                 print(f"[HARD LIMIT] Quota exhausted on {model_name}. Skipping remaining LLMs.")
                 break
-            
             print(f"[CLIENT ERROR] {model_name}: {e}. Trying next model...")
             continue
 
@@ -169,3 +162,41 @@ def llm_batch_rerank(query: str, results: list[dict]) -> list[int]:
     except json.JSONDecodeError:
         print("[ERROR] Failed to parse batch rerank JSON. Returning original order.")
         return [item['doc_id'] for item in results]
+
+def llm_evaluate_results(query: str, results: list[dict]) -> list[int]:
+    """
+    Evaluates search results using an LLM on a 0-3 scale.
+    3: Highly relevant, 2: Relevant, 1: Marginally relevant, 0: Not relevant.
+    """
+    formatted_results = [
+        f"{i+1}. {item['metadata']['title']}: {item['metadata']['description']}"
+        for i, item in enumerate(results)
+    ]
+    
+    prompt = f"""Rate how relevant each result is to this query on a 0-3 scale:
+
+                Query: "{query}"
+
+                Results:
+                {chr(10).join(formatted_results)}
+
+                Scale:
+                - 3: Highly relevant
+                - 2: Relevant
+                - 1: Marginally relevant
+                - 0: Not relevant
+
+                Do NOT give any numbers out than 0, 1, 2, or 3.
+
+                Return ONLY the scores in the same order you were given the documents. Return a valid JSON list, nothing else. For example:
+
+                [2, 0, 3, 2, 0, 1]"""
+
+    response_text = generate_content_with_fallback(prompt)
+    
+    try:
+        clean_json = response_text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_json)
+    except json.JSONDecodeError:
+        print(f"[ERROR] Failed to parse evaluation JSON. Response was: {response_text}")
+        return [0] * len(results)

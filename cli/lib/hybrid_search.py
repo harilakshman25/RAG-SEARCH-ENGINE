@@ -1,9 +1,14 @@
 import os
 import time
-from .search_utils import llm_individual_rerank, llm_batch_rerank, enhance_query
+from .search_utils import (
+    llm_individual_rerank, 
+    llm_batch_rerank, 
+    llm_evaluate_results,
+    enhance_query, 
+    load_movies as load_documents,
+)
 from .keyword_search import InvertedIndex
 from .semantic_search import ChunkedSemanticSearch
-from .search_utils import load_movies as load_documents
 from sentence_transformers import CrossEncoder
 
 class HybridSearch:
@@ -11,17 +16,14 @@ class HybridSearch:
         self.documents = documents
         self.doc_by_id = {doc["id"]: doc for doc in documents}
         
-        # Load Semantic Search
         self.semantic_search = ChunkedSemanticSearch()
         self.semantic_search.load_or_create_chunk_embeddings(documents)
 
-        # Load Inverted Index
         self.idx = InvertedIndex()
         if not os.path.exists(self.idx.index_path):
             self.idx.build()
             self.idx.save()
             
-        # Load CrossEncoder ONCE at startup to avoid timeouts during search
         print("Loading CrossEncoder model...")
         self.cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
 
@@ -30,16 +32,13 @@ class HybridSearch:
         return self.idx.bm25_search(query, limit)
     
     def _individual_rerank(self, query: str, results: list[dict]) -> list[dict]:
-        """Reranks items individually. Atomic: returns new list or raises error."""
         reranked_results = []
         for item in results:
             score = llm_individual_rerank(query, item["metadata"])
-            # Create a copy to avoid mutating the original list in case of partial failure
             new_item = item.copy()
             new_item["rerank_score"] = score
             reranked_results.append(new_item)
-            time.sleep(2)  # Reduced wait time for better UX, adjust as needed
-            
+            time.sleep(2)
         return sorted(reranked_results, key=lambda x: x["rerank_score"], reverse=True)
     
     def _batch_rerank(self, query: str, results: list[dict]) -> list[dict]:
@@ -51,7 +50,6 @@ class HybridSearch:
             new_item = item.copy()
             new_item["rerank_rank"] = rank_map.get(item["doc_id"], float("inf"))
             reranked_results.append(new_item)
-            
         return sorted(reranked_results, key=lambda x: x["rerank_rank"])
     
     def _cross_encoder_rerank(self, query: str, results: list[dict]) -> list[dict]:
@@ -59,20 +57,15 @@ class HybridSearch:
             [query, f"{item['metadata'].get('title','')} - {item['metadata'].get('description','')}"]
             for item in results
         ]
-        # Use the pre-loaded model
         scores = self.cross_encoder.predict(pairs)
-
         reranked_results = []
         for item, score in zip(results, scores):
             new_item = item.copy()
             new_item["cross_encoder_score"] = float(score)
             reranked_results.append(new_item)
-
         return sorted(reranked_results, key=lambda x: x["cross_encoder_score"], reverse=True)
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
-        """Perform weighted hybrid search combining BM25 and semantic search."""
-
         bm25_results = self._bm25_search(query, limit * 500)
         semantic_results = self.semantic_search.search_chunks(query, limit * 500)
 
@@ -95,9 +88,7 @@ class HybridSearch:
         for doc_id in all_doc_ids:
             bm25_score = bm25_norm.get(doc_id, 0.0)
             semantic_score = semantic_norm.get(doc_id, 0.0)
-
             hybrid_score = (1 - alpha) * bm25_score + alpha * semantic_score
-
             hybrid_scores.append({
                 "doc_id": doc_id,
                 "bm25_score": bm25_score,
@@ -110,8 +101,6 @@ class HybridSearch:
         return hybrid_scores[:limit]
 
     def rrf_search(self, query: str, k: int, limit: int = 10, enhance_method: str = None, rerank_method: str = None) -> list[dict]:
-        """Perform RRF hybrid search combining BM25 and semantic search."""
-
         if enhance_method:
             query = enhance_query(query, enhance_method)
         
@@ -129,9 +118,7 @@ class HybridSearch:
         for doc_id in all_doc_ids:
             bm25_rank = bm25_dict.get(doc_id, float('inf'))
             semantic_rank = semantic_dict.get(doc_id, float('inf'))
-
             rrf_score = self.__rrf_score(bm25_rank, k) + self.__rrf_score(semantic_rank, k)
-
             rrf_scores.append({
                 "doc_id": doc_id,
                 "rrf_score": rrf_score,
@@ -141,44 +128,37 @@ class HybridSearch:
             })
 
         rrf_scores.sort(key=lambda x: x["rrf_score"], reverse=True)
-        
-        # Candidate generation
         candidate_results = rrf_scores[:limit * 5]
 
-        # 1. Cross Encoder (Local)
         if rerank_method == "cross_encoder":
             print(f"Reranking top {limit} results using local cross_encoder...")
             return self._cross_encoder_rerank(query, candidate_results)[:limit]
 
-        # 2. LLM Reranking (Individual/Batch) with Safe Fallback
         if rerank_method in ["individual", "batch"]:
             try:
                 if rerank_method == "individual":
                     print(f"Reranking top {limit} results using individual LLM method...")
                     return self._individual_rerank(query, candidate_results)[:limit]
-                
                 if rerank_method == "batch":
                     print(f"Reranking top {limit} results using batch LLM method...")
                     return self._batch_rerank(query, candidate_results)[:limit]
-            
             except Exception as e:
                 print(f"\n[FALLBACK] LLM Reranking failed ({e}). Defaulting to local CrossEncoder...")
-                # Note: We pass the original 'candidate_results' here, ensuring no mixed data
                 return self._cross_encoder_rerank(query, candidate_results)[:limit]
         
-        # 3. No reranking
         return candidate_results[:limit]
 
     def __rrf_score(self, rank: int, k: int) -> float:
         return 1.0 / (k + rank)
 
 
-def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = None, rerank_method: str = None) -> None:
+def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = None, rerank_method: str = None, evaluate: bool = False) -> None:
     """Perform RRF hybrid search and print results."""
 
     documents = load_documents()
     hybrid_search = HybridSearch(documents)
     results = hybrid_search.rrf_search(query, k, limit, enhance_method, rerank_method)
+    
     print(f"Reciprocal Rank Fusion Results for '{query}' (k={k}):\n")
     for i, item in enumerate(results, 1):
         print(f"{i}. {item['metadata']['title']}")
@@ -192,10 +172,16 @@ def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = Non
         print(f"   BM25 Rank: {item['bm25_rank']}, Semantic Rank: {item['semantic_rank']}")
         print(f"   {item['metadata']['description'][:150]}...\n")
 
+    if evaluate:
+        print("\n--- AI Evaluation Report ---")
+        scores = llm_evaluate_results(query, results)
+        for i, item in enumerate(results):
+            # Safe indexing in case LLM returns fewer scores
+            score = scores[i] if i < len(scores) else 0
+            print(f"{i+1}. {item['metadata']['title']}: {score}/3")
+
 
 def weighted_search_command(query: str, alpha: float, limit: int) -> None:
-    """Perform weighted hybrid search and print results."""
-
     documents = load_documents()
     hybrid_search = HybridSearch(documents)
     results = hybrid_search.weighted_search(query, alpha, limit)
