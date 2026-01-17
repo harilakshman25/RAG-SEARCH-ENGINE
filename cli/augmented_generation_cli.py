@@ -3,6 +3,7 @@ from lib.augmented_generation import (
     perform_rag,
     summarize,
     search_with_citations,
+    answer_question_based_on_context,
 )
 
 def main():
@@ -26,6 +27,12 @@ def main():
     citations_parser.add_argument("query", type=str, help="Text to generate citations for")
     citations_parser.add_argument("--limit", type=int, default=5, help="Number of citations to generate")
 
+    question_parser = subparsers.add_parser(
+        "question", help="Answer questions based on provided context"
+    )
+    question_parser.add_argument("question", type=str, help="Question to answer based on context")
+    question_parser.add_argument("--limit", type=int, default=5, help="Number of documents to retrieve for context")
+
     args = parser.parse_args()
 
     match args.command:
@@ -35,6 +42,8 @@ def main():
             summarize(args.query, args.limit)
         case "citations":
             search_with_citations(args.query, args.limit)
+        case "question":
+            answer_question_based_on_context(args.question, args.limit)
         case _:
             parser.print_help()
 

@@ -84,3 +84,35 @@ def search_with_citations(query: str, limit: int = 5):
         print(f"  - {doc['metadata']['title']}")
     print("\nLLM Answer:")
     print(citations)
+
+def answer_question_based_on_context(question: str, limit: int = 5):
+    movies = load_movies()
+    search_engine = HybridSearch(movies)
+
+    retrieved_docs = search_engine.rrf_search(question, k = 60, limit=limit)
+    context = "\n".join([f"- {doc['metadata']['title']}: {doc['metadata']['description']}" for doc in retrieved_docs])
+
+    prompt = f"""Answer the user's question based on the provided movies that are available on Hoopla.
+
+                This should be tailored to Hoopla users. Hoopla is a movie streaming service.
+
+                Question: {question}
+
+                Documents:
+                {context}
+
+                Instructions:
+                - Answer questions directly and concisely
+                - Be casual and conversational
+                - Don't be cringe or hype-y
+                - Talk like a normal person would in a chat conversation
+
+                Answer:"""
+    
+    answer = generate_content_with_fallback(prompt)
+
+    print("Search Results:")
+    for doc in retrieved_docs:
+        print(f"  - {doc['metadata']['title']}")
+    print("\nAnswer:")
+    print(answer)
