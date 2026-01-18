@@ -71,6 +71,10 @@ def main():
     documents = load_movies()
     search_engine = HybridSearch(documents)
 
+    precision_scores = []
+    recall_scores = []
+    f1_scores = []
+
     print(f"k={limit}\n")
 
     for case in golden_data["test_cases"]:
@@ -82,6 +86,10 @@ def main():
         retrieved_titles = [item["metadata"]["title"] for item in results]
         
         precision, recall, f1 = calculate_metrics(retrieved_titles, relevant_docs)
+
+        precision_scores.append(precision)
+        recall_scores.append(recall)
+        f1_scores.append(f1)
         
         print(f"- Query: {query}")
         print(f"  - Precision@{limit}: {precision:.4f}")
@@ -93,6 +101,17 @@ def main():
         
         print(f"  - Retrieved: {retrieved_str}")
         print(f"  - Relevant: {relevant_str}\n")
+
+    print("-" * 40)
+    print(f"OVERALL PERFORMANCE (k={limit})")
+    print("-" * 40)
+    if precision_scores:
+        print(f"Mean Precision (MAP): {sum(precision_scores) / len(precision_scores):.4f}")
+        print(f"Mean Recall    (MAR): {sum(recall_scores) / len(recall_scores):.4f}")
+        print(f"Mean F1 Score:        {sum(f1_scores) / len(f1_scores):.4f}")
+    else:
+        print("No test cases found.")
+    print("-" * 40)
 
 if __name__ == "__main__":
     main()

@@ -5,6 +5,15 @@ from google import genai
 import os
 from lib.search_utils import api_key, DATA_DIR
 
+#VISION SUPPORTED_MODELS 
+
+VISION_SUPPORTED_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
+]
+
 def main():
     parser = argparse.ArgumentParser(description="Query Rewritten using Image")
     parser.add_argument("--image", type=str, help="Path to an image file")
@@ -33,18 +42,21 @@ def main():
         args.query.strip(),
     ]
 
-    model_name = "gemini-2.5-flash"
-
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=parts
-        )
-        print(f"Rewritten query: {response.text.strip()}")
-        if response.usage_metadata is not None:
-            print(f"Total tokens:    {response.usage_metadata.total_token_count}")
-    except Exception as e:
-       print(f"[ERROR] Unexpected failure with {model_name}: {e}. Trying fallback...")
+    for model in VISION_SUPPORTED_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=parts,
+            )
+            if response and getattr(response, "text", None):
+                print(f"[MODEL USED]: {model}\n")
+                print("Rewritten Query:")
+                print(response.text.strip())
+                return
+        except Exception as e:
+            print(f"[ERROR] with model {model}: {e}. Trying next model...")
+            continue
+    raise RuntimeError("All models failed to generate a response.")
             
 if __name__ == "__main__":
     main()

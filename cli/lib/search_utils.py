@@ -1,6 +1,6 @@
 import json
 import os
-import time
+import hashlib
 from dotenv import load_dotenv
 from google import genai
 from google.genai.errors import APIError, ServerError, ClientError
@@ -16,8 +16,11 @@ SCORE_PRECISION = 4
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 MOVIES_PATH = os.path.join(DATA_DIR, "movies.json")
-STOPWORDS_PATH = os.path.join(DATA_DIR, "stopwords.txt")
+STOPWORDS_PATH = os.path.join(PROJECT_ROOT, "data", "stopwords.txt")
 CACHE_DIR = os.path.join(PROJECT_ROOT, "cache")
+LLM_CACHE_DIR = os.path.join(CACHE_DIR, "llm_responses")
+
+os.makedirs(LLM_CACHE_DIR, exist_ok=True)
 
 FALLBACK_MODELS = [
     "gemini-2.5-flash",          
@@ -44,7 +47,26 @@ def load_stopwords() -> list[str]:
 
 client = genai.Client(api_key=api_key)
 
+def get_cache_path(prompt: str) -> str:
+    """Generates a unique filename for the prompt."""
+    hash_obj = hashlib.md5(prompt.encode("utf-8"))
+    return os.path.join(LLM_CACHE_DIR, f"{hash_obj.hexdigest()}.json")
+
 def generate_content_with_fallback(prompt: str) -> str:
+    """
+    Generates content with Model Rotation, Fail-Fast on Quota, and Disk Caching.
+    """
+
+    cache_path = get_cache_path(prompt)
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                cached_data = json.load(f)
+            print(f"[CACHE HIT] Serving response from disk...") 
+            return cached_data["response"]
+        except (json.JSONDecodeError, KeyError):
+            pass 
+
     for model_name in FALLBACK_MODELS:
         try:
             response = client.models.generate_content(
@@ -55,8 +77,13 @@ def generate_content_with_fallback(prompt: str) -> str:
             if not response or not getattr(response, "text", None):
                 print(f"[EMPTY] {model_name} returned no text. Trying next model...")
                 continue
+            
+            response_text = response.text.strip()
 
-            return response.text.strip()
+            with open(cache_path, "w") as f:
+                json.dump({"prompt": prompt, "model": model_name, "response": response_text}, f)
+
+            return response_text
 
         except ClientError as e:
             msg = str(e).upper()
@@ -165,10 +192,6 @@ def llm_batch_rerank(query: str, results: list[dict]) -> list[int]:
         return [item['doc_id'] for item in results]
 
 def llm_evaluate_results(query: str, results: list[dict]) -> list[int]:
-    """
-    Evaluates search results using an LLM on a 0-3 scale.
-    3: Highly relevant, 2: Relevant, 1: Marginally relevant, 0: Not relevant.
-    """
     formatted_results = [
         f"{i+1}. {item['metadata']['title']}: {item['metadata']['description']}"
         for i, item in enumerate(results)

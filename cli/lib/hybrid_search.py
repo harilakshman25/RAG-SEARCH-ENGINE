@@ -1,5 +1,5 @@
 import os
-import time
+import asyncio
 from .search_utils import (
     llm_individual_rerank, 
     llm_batch_rerank, 
@@ -24,21 +24,35 @@ class HybridSearch:
             self.idx.build()
             self.idx.save()
             
-        print("Loading CrossEncoder model...")
-        self.cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+        self._cross_encoder = None
+
+    @property
+    def cross_encoder(self):
+        """Lazy loader for CrossEncoder to improve startup time."""
+        if self._cross_encoder is None:
+            print("Loading CrossEncoder model (lazy load)...")
+            self._cross_encoder = CrossEncoder("cross-encoder/ms-marco-TinyBERT-L2-v2")
+        return self._cross_encoder
 
     def _bm25_search(self, query: str, limit: int) -> list[dict]:
         self.idx.load()
         return self.idx.bm25_search(query, limit)
     
-    def _individual_rerank(self, query: str, results: list[dict]) -> list[dict]:
-        reranked_results = []
-        for item in results:
-            score = llm_individual_rerank(query, item["metadata"])
+    async def _rerank_item_async(self, query: str, item: dict, semaphore: asyncio.Semaphore) -> dict:
+        """Async helper for individual reranking with concurrency limit."""
+        async with semaphore:
+            # Run the synchronous API call in a separate thread
+            score = await asyncio.to_thread(llm_individual_rerank, query, item["metadata"])
             new_item = item.copy()
             new_item["rerank_score"] = score
-            reranked_results.append(new_item)
-            time.sleep(2)
+            return new_item
+
+    async def _individual_rerank_async(self, query: str, results: list[dict]) -> list[dict]:
+        """Orchestrates the async reranking."""
+        # Limit concurrency to 3 parallel requests to avoid hitting rate limits too fast
+        semaphore = asyncio.Semaphore(3)
+        tasks = [self._rerank_item_async(query, item, semaphore) for item in results]
+        reranked_results = await asyncio.gather(*tasks)
         return sorted(reranked_results, key=lambda x: x["rerank_score"], reverse=True)
     
     def _batch_rerank(self, query: str, results: list[dict]) -> list[dict]:
@@ -50,6 +64,7 @@ class HybridSearch:
             new_item = item.copy()
             new_item["rerank_rank"] = rank_map.get(item["doc_id"], float("inf"))
             reranked_results.append(new_item)
+            
         return sorted(reranked_results, key=lambda x: x["rerank_rank"])
     
     def _cross_encoder_rerank(self, query: str, results: list[dict]) -> list[dict]:
@@ -57,12 +72,15 @@ class HybridSearch:
             [query, f"{item['metadata'].get('title','')} - {item['metadata'].get('description','')}"]
             for item in results
         ]
+       
         scores = self.cross_encoder.predict(pairs)
+
         reranked_results = []
         for item, score in zip(results, scores):
             new_item = item.copy()
             new_item["cross_encoder_score"] = float(score)
             reranked_results.append(new_item)
+
         return sorted(reranked_results, key=lambda x: x["cross_encoder_score"], reverse=True)
 
     def weighted_search(self, query: str, alpha: float, limit: int = 5) -> list[dict]:
@@ -88,7 +106,9 @@ class HybridSearch:
         for doc_id in all_doc_ids:
             bm25_score = bm25_norm.get(doc_id, 0.0)
             semantic_score = semantic_norm.get(doc_id, 0.0)
+
             hybrid_score = (1 - alpha) * bm25_score + alpha * semantic_score
+
             hybrid_scores.append({
                 "doc_id": doc_id,
                 "bm25_score": bm25_score,
@@ -118,7 +138,9 @@ class HybridSearch:
         for doc_id in all_doc_ids:
             bm25_rank = bm25_dict.get(doc_id, float('inf'))
             semantic_rank = semantic_dict.get(doc_id, float('inf'))
+
             rrf_score = self.__rrf_score(bm25_rank, k) + self.__rrf_score(semantic_rank, k)
+
             rrf_scores.append({
                 "doc_id": doc_id,
                 "rrf_score": rrf_score,
@@ -128,6 +150,7 @@ class HybridSearch:
             })
 
         rrf_scores.sort(key=lambda x: x["rrf_score"], reverse=True)
+        
         candidate_results = rrf_scores[:limit * 5]
 
         if rerank_method == "cross_encoder":
@@ -137,11 +160,14 @@ class HybridSearch:
         if rerank_method in ["individual", "batch"]:
             try:
                 if rerank_method == "individual":
-                    print(f"Reranking top {limit} results using individual LLM method...")
-                    return self._individual_rerank(query, candidate_results)[:limit]
+                    print(f"Reranking top {limit} results using individual LLM method (Async)...")
+                    # Run the async reranking loop
+                    return asyncio.run(self._individual_rerank_async(query, candidate_results))[:limit]
+                
                 if rerank_method == "batch":
                     print(f"Reranking top {limit} results using batch LLM method...")
                     return self._batch_rerank(query, candidate_results)[:limit]
+            
             except Exception as e:
                 print(f"\n[FALLBACK] LLM Reranking failed ({e}). Defaulting to local CrossEncoder...")
                 return self._cross_encoder_rerank(query, candidate_results)[:limit]
@@ -176,7 +202,6 @@ def rrf_search_command(query: str, k: int, limit: int, enhance_method: str = Non
         print("\n--- AI Evaluation Report ---")
         scores = llm_evaluate_results(query, results)
         for i, item in enumerate(results):
-            # Safe indexing in case LLM returns fewer scores
             score = scores[i] if i < len(scores) else 0
             print(f"{i+1}. {item['metadata']['title']}: {score}/3")
 
